@@ -237,9 +237,103 @@ def run_aes_cfb_tests():
 
         print("-" * 50)
 
+
+# Modified version of the internal AES function tests with result printing
+
+def run_internal_aes_tests_verbose(Sbox, sub_bytes, shift_rows, mix_single_column, mix_columns, add_round_key, key_expansion):
+    results = {}
+
+    def transpose_key_schedule(words):
+        return [[words[col][row] for col in range(4)] for row in range(4)]
+
+    # Test sub_bytes
+    input_state = [
+        [0x19, 0xa0, 0x9a, 0xe9],
+        [0x3d, 0xf4, 0xc6, 0xf8],
+        [0xe3, 0xe2, 0x8d, 0x48],
+        [0xbe, 0x2b, 0x2a, 0x08],
+    ]
+    expected_after_sub_bytes = [
+        [Sbox[b] for b in row] for row in input_state
+    ]
+    sub_result = sub_bytes([row[:] for row in input_state])
+    results['sub_bytes'] = (sub_result == expected_after_sub_bytes, sub_result)
+
+    # Test shift_rows
+    input_shift = [
+        [0xd4, 0xe0, 0xb8, 0x1e],
+        [0xbf, 0xb4, 0x41, 0x27],
+        [0x5d, 0x52, 0x11, 0x98],
+        [0x30, 0xae, 0xf1, 0xe5],
+    ]
+    expected_after_shift = [
+        [0xd4, 0xe0, 0xb8, 0x1e],
+        [0xb4, 0x41, 0x27, 0xbf],
+        [0x11, 0x98, 0x5d, 0x52],
+        [0xe5, 0x30, 0xae, 0xf1],
+    ]
+    shift_result = shift_rows([row[:] for row in input_shift])
+    results['shift_rows'] = (shift_result == expected_after_shift, shift_result)
+
+    # Test mix_single_column
+    col = [0xdb, 0x13, 0x53, 0x45]
+    expected_col = [0x8e, 0x4d, 0xa1, 0xbc]
+    mixed_col = mix_single_column(col[:])
+    results['mix_single_column'] = (mixed_col == expected_col, mixed_col)
+
+    # Test mix_columns
+    input_mix = [
+        [0xdb, 0xf2, 0x01, 0xc6],
+        [0x13, 0x0a, 0x01, 0xc6],
+        [0x53, 0x22, 0x01, 0xc6],
+        [0x45, 0x5c, 0x01, 0xc6],
+    ]
+    expected_mix = [
+        [0x8e, 0x9f, 0x01, 0xc6],
+        [0x4d, 0xdc, 0x01, 0xc6],
+        [0xa1, 0x58, 0x01, 0xc6],
+        [0xbc, 0x9d, 0x01, 0xc6],
+    ]
+    mix_result = mix_columns([row[:] for row in input_mix])
+    results['mix_columns'] = (mix_result == expected_mix, mix_result)
+
+    # Test key_expansion (first and last round keys)
+    key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
+    ks = key_expansion(key)
+    expected_last_round = [
+        [0xd0, 0xc9, 0xe1, 0xb6],
+        [0x14, 0xee, 0x3f, 0x63],
+        [0xf9, 0x25, 0x0c, 0x0c],
+        [0xa8, 0x89, 0xc8, 0xa6],
+    ]
+    last_round_key_words = ks[40:44]
+    last_round_key_matrix = transpose_key_schedule(last_round_key_words)
+    results['key_expansion'] = (last_round_key_matrix == expected_last_round, last_round_key_matrix)
+
+    return results
+
+
+
 if __name__ == "__main__":
     run_aes_cfb_tests()
 
-
 if __name__ == '__main__':
     main()
+
+
+if __name__ == "__main__":
+    results = run_internal_aes_tests_verbose(
+        Sbox,
+        sub_bytes,
+        shift_rows,
+        mix_single_column,
+        mix_columns,
+        add_round_key,
+        key_expansion
+    )
+
+    print("🔍 AES Internal Function Test Results:")
+    for name, (passed, result) in results.items():
+        print(f"  {name}: {'✅ PASS' if passed else '❌ FAIL'}")
+        if not passed:
+            print(f"    Output: {result}")
