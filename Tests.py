@@ -9,7 +9,7 @@ from main import (
 )
 class Invalid_Input_TestCase(unittest.TestCase):
     def test_invalid_key_length(self):
-        # Key must be 16 bytes
+        # Test that encryption fails when key length is invalid (not 16 bytes)
         key = os.urandom(15)  # Invalid length
         iv = os.urandom(16)
         plaintext = b"test"
@@ -17,7 +17,7 @@ class Invalid_Input_TestCase(unittest.TestCase):
             encrypt_cfb(plaintext, key, iv)
 
     def test_invalid_iv_length(self):
-        # IV must be 16 bytes
+        # Test that encryption fails when IV length is invalid (not 16 bytes)
         key = os.urandom(16)
         iv = os.urandom(15)  # Invalid length
         plaintext = b"test"
@@ -26,20 +26,70 @@ class Invalid_Input_TestCase(unittest.TestCase):
 
 
 # -------------------------------
-# Test AES-CFB Mode Functionality
+# Test AES128-CFB Mode Functionality
 # -------------------------------
 class AES128_with_CFBmode_TestCase(unittest.TestCase):
 
-    def test_partial_block(self):
-        # Partial block encryption and decryption (not 16 bytes)
+    def test_iv_affects_ciphertext(self):
+        # Test that using different IVs results in different ciphertexts for same plaintext/key
+        key = bytes.fromhex('2b7e151628aed2a6abf7158809cf4f3c')  # 128-bit AES key
+        plaintext = b"Sensitive block!"
+
+        iv1 = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
+        iv2 = bytes.fromhex('0f0e0d0c0b0a09080706050403020100')  # flipped IV
+
+        ciphertext1 = encrypt_cfb(plaintext, key, iv1)
+        ciphertext2 = encrypt_cfb(plaintext, key, iv2)
+
+        self.assertNotEqual(ciphertext1, ciphertext2, "Ciphertexts should differ when IVs differ")
+
+    def test_wrong_key_fails_to_decrypt(self):
+        # Test that decrypting with wrong key does not return original plaintext
+        key1 = os.urandom(16)
+        key2 = os.urandom(16)
+        iv = os.urandom(16)
+        plaintext = b"Perfect block size test input!!!"
+
+        ciphertext = encrypt_cfb(plaintext, key1, iv)
+        decrypted = decrypt_cfb(ciphertext, key2, iv)
+
+        self.assertNotEqual(decrypted, plaintext, "Decryption with wrong key should not return original plaintext")
+
+    def test_encrypt_decrypt_block_multiples(self):
+        # Test encryption/decryption round-trip for various plaintext lengths (block-aligned)
+        key = os.urandom(16)
+        iv = os.urandom(16)
+
+        for length in [16, 32, 64, 128, 256]:
+            with self.subTest(length=length):
+                plaintext = os.urandom(length)
+                ciphertext = encrypt_cfb(plaintext, key, iv)
+                decrypted = decrypt_cfb(ciphertext, key, iv)
+                self.assertEqual(decrypted, plaintext, f"Decryption failed for length {length}")
+
+    def test_tampered_ciphertext_does_not_match_plaintext(self):
+        # Test that tampering with ciphertext results in incorrect plaintext after decryption
+        key = os.urandom(16)
+        iv = os.urandom(16)
+        plaintext = b"The sensitive data to protect!!."
+
+        ciphertext = encrypt_cfb(plaintext, key, iv)
+        tampered = bytearray(ciphertext)
+        tampered[5] ^= 0xFF  # Flip a bit
+
+        decrypted = decrypt_cfb(bytes(tampered), key, iv)
+        self.assertNotEqual(decrypted, plaintext, "Tampered ciphertext should not decrypt to original plaintext")
+
+    def test_invalid_block_size(self):
+        # Verify that encrypting plaintext with an invalid block size raises a ValueError
         key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
         iv = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
-        plaintext = b"HELLO!!"  # 7 bytes
-        ciphertext = encrypt_cfb(plaintext, key, iv)
-        decrypted = decrypt_cfb(ciphertext, key, iv)
-        self.assertEqual(decrypted, plaintext)
+        plaintext = b"HELLO!!"  # 7 bytes — not a multiple of 16
+        with self.assertRaises(ValueError):
+            encrypt_cfb(plaintext, key, iv)
 
     def test_long_plaintext(self):
+        # Test encryption and decryption with a very long plaintext (10,000 bytes)
         # Very long plaintext (10,000 bytes)
         key = os.urandom(16)
         iv = os.urandom(16)
@@ -49,6 +99,7 @@ class AES128_with_CFBmode_TestCase(unittest.TestCase):
         self.assertEqual(decrypted, plaintext)
 
     def test_all_zero_input(self):
+        # Check that encrypting and decrypting all-zero plaintext works correctly
         # Input filled with zero bytes
         key = b'\x00' * 16
         iv = b'\x00' * 16
@@ -58,83 +109,92 @@ class AES128_with_CFBmode_TestCase(unittest.TestCase):
         self.assertEqual(decrypted, plaintext)
 
     def test_empty_plaintext(self):
-        # No input should produce no output
+        # Verify that encrypting an empty plaintext raises a ValueError
         key = os.urandom(16)
         iv = os.urandom(16)
         plaintext = b""
-        ciphertext = encrypt_cfb(plaintext, key, iv)
-        self.assertEqual(ciphertext, b"")
-        decrypted = decrypt_cfb(ciphertext, key, iv)
-        self.assertEqual(decrypted, plaintext)
+        with self.assertRaises(ValueError):
+            encrypt_cfb(plaintext, key, iv)
 
+    def test_empty_ciphertext(self):
+        # Verify that decrypting an empty ciphertext raises a ValueError
+        key = os.urandom(16)
+        iv = os.urandom(16)
+        ciphertext = b""
+        with self.assertRaises(ValueError):
+            decrypt_cfb(ciphertext, key, iv)
 
     def test_randomized_round_trip(self):
-        # Random inputs should round-trip successfully
-        for _ in range(10):
-            key = os.urandom(16)
-            iv = os.urandom(16)
-            plaintext = os.urandom(100)
-            ciphertext = encrypt_cfb(plaintext, key, iv)
-            decrypted = decrypt_cfb(ciphertext, key, iv)
-            self.assertEqual(decrypted, plaintext)
+        # Confirm that encrypting plaintext with non-block-aligned length raises a ValueError
+        import os
+        key = os.urandom(16)
+        iv = os.urandom(16)
+        plaintext = os.urandom(100)  # 100 bytes — not a multiple of 16
+        with self.assertRaises(ValueError):
+            encrypt_cfb(plaintext, key, iv)
 
     def test_same_plaintext_different_iv(self):
+        # Ensure that encrypting the same plaintext with different IVs produces different ciphertexts
         # Same input, different IV → different output
         key = os.urandom(16)
         iv1 = os.urandom(16)
         iv2 = os.urandom(16)
-        plaintext = b"Important message."
+        plaintext = b"Securing data can be quite fun!!"
         ct1 = encrypt_cfb(plaintext, key, iv1)
         ct2 = encrypt_cfb(plaintext, key, iv2)
         self.assertNotEqual(ct1, ct2)
 
     def test_different_keys_same_iv(self):
+        # Verify that different keys produce different ciphertexts given the same plaintext and IV
         # Different keys → different ciphertext
         key1 = os.urandom(16)
         key2 = os.urandom(16)
         iv = os.urandom(16)
-        plaintext = b"Important message."
+        plaintext = b"Time flies when you are coding!!"
         ct1 = encrypt_cfb(plaintext, key1, iv)
         ct2 = encrypt_cfb(plaintext, key2, iv)
         self.assertNotEqual(ct1, ct2)
 
     def test_reused_iv_same_ciphertext(self):
+        # Confirm that encrypting the same plaintext twice with the same IV produces identical ciphertexts
         # Encrypt same input twice → same result
         key = bytes.fromhex('2b7e151628aed2a6abf7158809cf4f3c')
         iv = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
-        plaintext = b"same input for both cases"
+        plaintext = b"We had fun building this cipher!"
         ct1 = encrypt_cfb(plaintext, key, iv)
         ct2 = encrypt_cfb(plaintext, key, iv)
         self.assertEqual(ct1, ct2)
 
     def test_utf8_unicode_plaintext(self):
+        # Test encrypting and decrypting UTF-8 encoded Unicode plaintext
         # Encrypt and decrypt UTF-8 encoded Unicode
         key = bytes.fromhex('603deb1015ca71be2b73aef0857d7781')
         iv = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
-        plaintext = "שלום".encode('utf-8')
+        plaintext = "שלום לכם ".encode('utf-8')
         ciphertext = encrypt_cfb(plaintext, key, iv)
         decrypted = decrypt_cfb(ciphertext, key, iv)
         self.assertEqual(decrypted, plaintext)
 
     def test_ciphertext_differs_on_similar_prefixes(self):
+        # Verify that similar plaintexts produce different ciphertexts
         # Similar messages should produce different ciphertexts
         key = bytes.fromhex('2b7e151628aed2a6abf7158809cf4f3c')
         iv = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
-        ct1 = encrypt_cfb(b"Hello world!", key, iv)
-        ct2 = encrypt_cfb(b"Hello there!", key, iv)
+        ct1 = encrypt_cfb(b"Hello my world!!", key, iv)
+        ct2 = encrypt_cfb(b"Hello my friend!", key, iv)
         self.assertNotEqual(ct1, ct2)
 
     def test_non_block_aligned_lengths(self):
-        # Random lengths not multiples of 16
-        for length in [17, 31, 48]:
-            key = os.urandom(16)
-            iv = os.urandom(16)
-            plaintext = os.urandom(length)
-            ciphertext = encrypt_cfb(plaintext, key, iv)
-            decrypted = decrypt_cfb(ciphertext, key, iv)
-            self.assertEqual(decrypted, plaintext)
+        # Confirm that encrypting plaintexts with non-block-aligned lengths raises a ValueError
+        key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
+        iv = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
+        for length in [17, 31]:  # not multiples of 16
+            plaintext = bytes([0x41] * length)
+            with self.assertRaises(ValueError):
+                encrypt_cfb(plaintext, key, iv)
 
     def setUp(self):
+        # Setup predefined NIST test vectors for encryption and decryption
         self.test_vectors = [
             {
                 "key": "2b7e151628aed2a6abf7158809cf4f3c",
@@ -163,6 +223,7 @@ class AES128_with_CFBmode_TestCase(unittest.TestCase):
         ]
 
     def test_encrypt_and_decrypt_vectors(self):
+        # Test encryption and decryption correctness using official NIST AES128-CFB test vectors
         for idx, vector in enumerate(self.test_vectors, 1):
             with self.subTest(vector=vector["description"]):
                 key = hex2bytes(vector["key"])
@@ -174,10 +235,10 @@ class AES128_with_CFBmode_TestCase(unittest.TestCase):
                 decrypted = decrypt_cfb(ciphertext, key, iv)
 
                 self.assertEqual(ciphertext, expected_ciphertext,
-                                 f"\n❌ Encryption failed:\nExpected: {expected_ciphertext.hex()}\nGot     : {ciphertext.hex()}")
+                                 f"\nEncryption failed:\nExpected: {expected_ciphertext.hex()}\nGot     : {ciphertext.hex()}")
 
                 self.assertEqual(decrypted, plaintext,
-                                 f"\n❌ Decryption failed:\nExpected: {plaintext.hex()}\nGot     : {decrypted.hex()}")
+                                 f"\nDecryption failed:\nExpected: {plaintext.hex()}\nGot     : {decrypted.hex()}")
 
 
 # ---NIST Vector Parsing & Test---
@@ -185,6 +246,7 @@ class AES128_with_CFBmode_TestCase(unittest.TestCase):
 VECTORS_DIR = "nist_vectors_cfb"
 
 def parse_rsp_file(filepath):
+    # Parse NIST response (.rsp) test vector files into structured test data
     with open(filepath, 'r') as f:
         lines = f.readlines()
 
@@ -214,6 +276,7 @@ def parse_rsp_file(filepath):
     return tests
 
 def run_test_case_vector(test, mode):
+    # Execute a single NIST test vector for encryption or decryption and return results
     key = unhexlify(test["KEY"])
     iv = unhexlify(test["IV"])
     plaintext = unhexlify(test["PLAINTEXT"])
@@ -230,6 +293,7 @@ def run_test_case_vector(test, mode):
 
 class NISTVectors_TestCase(unittest.TestCase):
     def test_all_vectors(self):
+        # Run all NIST vector tests found in the specified directory and validate implementation correctness
         total_tests = 0
         for filename in os.listdir(VECTORS_DIR):
             if not filename.endswith(".rsp"):
@@ -253,7 +317,7 @@ class NISTVectors_TestCase(unittest.TestCase):
 class AESTestCase(unittest.TestCase):
 
     def test_encrypt_block(self):
-        # Example from FIPS-197 Appendix B (official AES spec)
+        #  Test AES128 block encryption against known output from the official AES128 specification
         plaintext = hex2bytes("00112233445566778899aabbccddeeff")
         key = hex2bytes("000102030405060708090a0b0c0d0e0f")
         expected_ciphertext = hex2bytes("69c4e0d86a7b0430d8cdb78070b4c55a")
@@ -264,9 +328,11 @@ class AESTestCase(unittest.TestCase):
         self.assertEqual(ciphertext, expected_ciphertext)
 
     def transpose_key_schedule(self, words):
+        # Utility to transpose key schedule words for comparison or display purposes
         return [[words[col][row] for col in range(4)] for row in range(4)]
 
     def test_sub_bytes(self):
+        # Test SubBytes transformation against expected S-box substitutions
         input_state = [
             [0x19, 0xa0, 0x9a, 0xe9],
             [0x3d, 0xf4, 0xc6, 0xf8],
@@ -278,6 +344,7 @@ class AESTestCase(unittest.TestCase):
         self.assertEqual(result, expected)
 
     def test_shift_rows(self):
+        # Test ShiftRows transformation to verify correct row shifts
         input_state = [
             [0xd4, 0xe0, 0xb8, 0x1e],
             [0xbf, 0xb4, 0x41, 0x27],
@@ -294,12 +361,14 @@ class AESTestCase(unittest.TestCase):
         self.assertEqual(result, expected)
 
     def test_mix_single_column(self):
+        # Test MixSingleColumn transformation with a known input and expected output
         col = [0xdb, 0x13, 0x53, 0x45]
         expected = [0x8e, 0x4d, 0xa1, 0xbc]
         result = mix_single_column(col[:])
         self.assertEqual(result, expected)
 
     def test_mix_columns(self):
+        # Test MixColumns transformation on a full state matrix
         input_state = [
             [0xdb, 0xf2, 0x01, 0xc6],
             [0x13, 0x0a, 0x01, 0xc6],
@@ -316,6 +385,7 @@ class AESTestCase(unittest.TestCase):
         self.assertEqual(result, expected)
 
     def test_key_expansion_last_round_key(self):
+        # Validate the last round key generated by the key expansion process matches expected values
         key = unhexlify("2b7e151628aed2a6abf7158809cf4f3c")
         expanded = key_expansion(key)
         expected_last = [
@@ -329,6 +399,7 @@ class AESTestCase(unittest.TestCase):
         self.assertEqual(last_matrix, expected_last)
 
     def test_add_round_key(self):
+        # Test the AddRoundKey step by verifying XOR with the round key schedule
         state = [
             [0x32, 0x88, 0x31, 0xe0],
             [0x43, 0x5a, 0x31, 0x37],

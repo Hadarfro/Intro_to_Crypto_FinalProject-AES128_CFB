@@ -1,8 +1,34 @@
-# AES constants
-Nb = 4
-Nk = 4
-Nr = 10
+# =============================
+# AES-128 + CFB Mode Encryption
+# =============================
 
+"""            Plaintext Block (P_i)
+                    |
+                    v
+                  XOR <-------------+
+                    |               |
+                    v               |
+            Encrypted IV or C_{i-1} |   <-- initial IV used for first block
+                    |               |
+                    v               |
+            AES Encrypt Block       |
+                    |               |
+                    +-------------->+
+                    |
+                    v
+            Ciphertext Block (C_i)      """
+
+
+# -----------------------------------
+# Constants for AES (128-bit version)
+# -----------------------------------
+Nb = 4     # Number of columns (32-bit words) in the state (always 4 for AES)
+Nk = 4     # Number of 32-bit words in the key (4 for AES-128)
+Nr = 10    # Number of rounds (10 for AES-128)
+
+# ----------------------
+# S-Box for SubBytes step
+# ----------------------
 Sbox = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5,
     0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -38,19 +64,33 @@ Sbox = [
     0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 ]
 
+# -------------------------------------
+# Round constant word array for key expansion
+# -------------------------------------
 
 Rcon = [
     0x00, 0x01, 0x02, 0x04, 0x08,
     0x10, 0x20, 0x40, 0x80, 0x1B, 0x36
 ]
 
+
+# --------------------------------------
+# Performs SubBytes transformation on state using S-box
+# --------------------------------------
 def sub_bytes(state):
+    # Apply byte substitution to each byte using the S-box
     for i in range(4):
         for j in range(4):
             state[i][j] = Sbox[state[i][j]]
     return state
 
+
+# --------------------------------------
+# Performs ShiftRows transformation (cyclic row shifts)
+# --------------------------------------
 def shift_rows(state):
+    # Each row in the state is shifted left by its row index
+    # Row 0 is unchanged, row 1 shifted left by 1, etc.
     state[1][0], state[1][1], state[1][2], state[1][3] = \
         state[1][1], state[1][2], state[1][3], state[1][0]
     state[2][0], state[2][1], state[2][2], state[2][3] = \
@@ -59,10 +99,20 @@ def shift_rows(state):
         state[3][3], state[3][0], state[3][1], state[3][2]
     return state
 
+
+# --------------------------------------
+# Helper function for MixColumns (performs xtime multiplication)
+# --------------------------------------
 def xtime(a):
+    # Multiply by 2 in GF(2^8)
     return ((a << 1) ^ 0x1b) & 0xff if (a & 0x80) else (a << 1)
 
+
+# --------------------------------------
+# Mixes one column for the MixColumns transformation
+# --------------------------------------
 def mix_single_column(a):
+    # Applies the MixColumns transformation to a single column
     t = a[0] ^ a[1] ^ a[2] ^ a[3]
     u = a[0]
     a[0] ^= t ^ xtime(a[0] ^ a[1])
@@ -71,7 +121,12 @@ def mix_single_column(a):
     a[3] ^= t ^ xtime(a[3] ^ u)
     return a
 
+
+# --------------------------------------
+# Applies MixColumns transformation to the entire state
+# --------------------------------------
 def mix_columns(state):
+    # Operates column-by-column on the state
     for i in range(4):
         col = [state[j][i] for j in range(4)]
         col = mix_single_column(col)
@@ -79,50 +134,60 @@ def mix_columns(state):
             state[j][i] = col[j]
     return state
 
+
+# --------------------------------------
+# Adds (XORs) round key to state for a given round
+# --------------------------------------
 def add_round_key(state, key_schedule, round_num):
+    # Each byte in the state is XORed with the corresponding byte from the round key
     for col in range(4):
         for row in range(4):
             state[row][col] ^= key_schedule[round_num * 4 + col][row]
     return state
 
+
+# --------------------------------------
+# Expands the 128-bit AES key into a key schedule for all rounds
+# --------------------------------------
 def key_expansion(key):
-    Rcon = [
-        0x00, 0x01, 0x02, 0x04, 0x08,
-        0x10, 0x20, 0x40, 0x80, 0x1B, 0x36
-    ]
+    # Generate 44 words (each of 4 bytes) from the 16-byte key
     key_schedule = [list(key[i:i+4]) for i in range(0, 16, 4)]
     for i in range(4, 44):
         temp = key_schedule[i - 1][:]
         if i % 4 == 0:
-            temp = temp[1:] + temp[:1]  # RotWord
-            temp = [Sbox[b] for b in temp]  # SubWord
-            temp[0] ^= Rcon[i // 4]
-        word = [a ^ b for a, b in zip(key_schedule[i - 4], temp)]
+            temp = temp[1:] + temp[:1]                 # RotWord: rotate 4-byte word left
+            temp = [Sbox[b] for b in temp]             # SubWord: apply S-box to each byte
+            temp[0] ^= Rcon[i // 4]                    # XOR with round constant (only first byte)
+        word = [a ^ b for a, b in zip(key_schedule[i - 4], temp)]  # XOR with word from 4 positions back
         key_schedule.append(word)
     return key_schedule
 
+
+# --------------------------------------
+# Encrypts a single 16-byte block using AES (CFB mode)
+# --------------------------------------
 def cipher(input_bytes, key_schedule):
-    # Build 4x4 state matrix in column-major order
+    # Arrange input bytes into 4x4 state matrix (column-major order)
     state = [[0] * 4 for _ in range(4)]
     for i in range(16):
         state[i % 4][i // 4] = input_bytes[i]
 
-    # Initial round
+    # Initial round key addition
     state = add_round_key(state, key_schedule, 0)
 
-    # Rounds 1 to 9
+    # Perform 9 main rounds
     for round in range(1, 10):
         state = sub_bytes(state)
         state = shift_rows(state)
         state = mix_columns(state)
         state = add_round_key(state, key_schedule, round)
 
-    # Final round (without mix_columns)
+    # Final round (no mix_columns)
     state = sub_bytes(state)
     state = shift_rows(state)
     state = add_round_key(state, key_schedule, 10)
 
-    # Convert state matrix back to 16-byte output in column-major order
+    # Flatten state matrix back to byte array (column-major)
     output = bytearray(16)
     for col in range(4):
         for row in range(4):
@@ -130,56 +195,94 @@ def cipher(input_bytes, key_schedule):
 
     return bytes(output)
 
+
+# --------------------------------------
+# XORs two byte strings of equal length
+# --------------------------------------
 def xor_bytes(a, b):
+    # XORs corresponding bytes from two byte strings
     return bytes(i ^ j for i, j in zip(a, b))
 
-# -----------------------
-# AES-128 CFB mode logic
-# -----------------------
+
+# --------------------------------------
+# Encrypts a 16-byte block using AES-128
+# --------------------------------------
 def aes_128_encrypt_block(block, key_schedule):
+    # Wrapper around cipher to match naming convention
     return cipher(block, key_schedule)
 
+
+# --------------------------------------
+# Encrypts plaintext using AES-128 in CFB mode
+# --------------------------------------
 def encrypt_cfb(plaintext, key, iv):
     assert len(key) == 16 and len(iv) == 16
-    key_schedule = key_expansion(key)
+    if len(plaintext) == 0:
+        raise ValueError("Plaintext must not be empty")
+    if len(plaintext) % 16 != 0:
+        raise ValueError("Plaintext length must be a multiple of 16 bytes for CFB-128 mode")
+
+    key_schedule = key_expansion(key)  # Generate round keys
     ciphertext = b''
-    prev = iv
+    prev = iv  # Initialization vector used for first block
+
     for i in range(0, len(plaintext), 16):
-        block = plaintext[i:i+16].ljust(16, b'\x00')
-        encrypted = aes_128_encrypt_block(prev, key_schedule)
-        cipher_block = xor_bytes(block, encrypted)
-        ciphertext += cipher_block[:len(plaintext[i:i+16])]
-        prev = cipher_block
+        block = plaintext[i:i + 16]
+        encrypted = aes_128_encrypt_block(prev, key_schedule)  # Encrypt previous ciphertext
+        cipher_block = xor_bytes(block, encrypted[:len(block)])  # XOR with plaintext to get ciphertext
+        ciphertext += cipher_block
+        prev = cipher_block  # ciphertext becomes IV for next block
     return ciphertext
 
+
+# -----------------------------------------
+# Decrypts ciphertext using AES-128 in CFB mode
+# ------------------------------------------
 def decrypt_cfb(ciphertext, key, iv):
     assert len(key) == 16 and len(iv) == 16
+    if len(ciphertext) == 0:
+        raise ValueError("Ciphertext must not be empty")
+    if len(ciphertext) % 16 != 0:
+        raise ValueError("Ciphertext length must be a multiple of 16 bytes for CFB-128 mode")
+
     key_schedule = key_expansion(key)
     plaintext = b''
-    prev = iv
+    prev = iv  # Start with IV
+
     for i in range(0, len(ciphertext), 16):
-        block = ciphertext[i:i+16].ljust(16, b'\x00')
-        encrypted = aes_128_encrypt_block(prev, key_schedule)
-        plain_block = xor_bytes(block, encrypted)
-        plaintext += plain_block[:len(ciphertext[i:i+16])]
-        prev = block
+        block = ciphertext[i:i + 16]
+        encrypted = aes_128_encrypt_block(prev, key_schedule)  # Encrypt previous ciphertext or IV
+        plain_block = xor_bytes(block, encrypted[:len(block)])  # XOR to recover plaintext
+        plaintext += plain_block
+        prev = block  # ciphertext used for next block's encryption
     return plaintext
 
+
+# ---------------------------------------------------------------------
+# Main function to demonstrate AES-128 encryption/decryption in CFB mode
+# ---------------------------------------------------------------------
 def main():
     key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
     iv = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
     plaintext = bytes.fromhex("6bc1bee22e409f96e93d7e117393172a")
     expected_ciphertext = bytes.fromhex("3b3fd92eb72dad20333449f8e83cfb4a")
 
+    print()
+    print("=== AES128 CFB mode Encryption ===")
+    print(f"Plaintext before encryption (hex): {plaintext.hex()}")
+    print(f"Expected ciphertext              : {expected_ciphertext.hex()}")
+
     ciphertext = encrypt_cfb(plaintext, key, iv)
+    print(f"Ciphertext (hex)                 : {ciphertext.hex()}")
+    print(f"Matches expected                 : {'✅' if ciphertext == expected_ciphertext else '❌'}")
 
-    print("Ciphertext (hex):", ciphertext.hex())
-    print("Matches expected:", ciphertext == expected_ciphertext)
+    print("\n=== AES128 CFB mode Decryption ===")
+    print(f"Ciphertext before decryption (hex): {expected_ciphertext.hex()}")
 
-    decrypted = decrypt_cfb(ciphertext, key, iv)
-    print("Decrypted:", decrypted.hex())
-    print("Matches original:", decrypted == plaintext)
-
+    decrypted = decrypt_cfb(expected_ciphertext, key, iv)
+    print(f"Expected plaintext (hex)          : {plaintext.hex()}")
+    print(f"Decrypted (hex)                   : {decrypted.hex()}")
+    print(f"Matches original                  : {'✅' if decrypted == plaintext else '❌'}")
 
 
 if __name__ == '__main__':
